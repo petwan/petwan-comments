@@ -141,13 +141,14 @@ query Thread($owner: String!, $name: String!, $number: Int!, $first: Int!) {
       isAnswered
       createdAt
       author { login avatarUrl }
-      answer { id bodyText createdAt author { login avatarUrl } }
+      answer { id bodyText bodyHTML createdAt author { login avatarUrl } }
       comments(first: $first) {
         totalCount
         nodes {
           id
           body
           bodyText
+          bodyHTML
           createdAt
           updatedAt
           isAnswer
@@ -162,6 +163,10 @@ query Thread($owner: String!, $name: String!, $number: Int!, $first: Int!) {
 /**
  * Read one thread, with its comments.
  *
+ * A page nobody has commented on has no discussion yet — reads never
+ * create one (crawlers would otherwise open an empty thread per page).
+ * The client calls ensureThread (POST) when the first comment lands.
+ *
  * @param {string} rawSlug
  * @param {{fresh?: boolean}} [options]
  * @returns {Promise<object>}
@@ -174,11 +179,16 @@ export async function getThread(rawSlug, options = {}) {
     if (cached) return { ...cached, cached: true };
   }
 
-  const discussion = await ensureDiscussion(slug);
+  const index = await getIndex();
+  const existing = index.get(slug);
+  if (!existing) {
+    return { slug, discussion: null, body: "", answer: null, comments: [], totalCount: 0, cached: false };
+  }
+
   const data = await graphql(THREAD_QUERY, {
     owner: config.owner,
     name: config.name,
-    number: discussion.number,
+    number: existing.number,
     first: 100,
   });
 
@@ -202,6 +212,7 @@ export async function getThread(rawSlug, options = {}) {
       ? {
           id: node.answer.id,
           body: node.answer.bodyText ?? "",
+          bodyHtml: node.answer.bodyHTML ?? "",
           createdAt: node.answer.createdAt,
           author: node.answer.author,
         }
@@ -209,6 +220,7 @@ export async function getThread(rawSlug, options = {}) {
     comments: (node.comments?.nodes ?? []).map((comment) => ({
       id: comment.id,
       body: comment.bodyText ?? "",
+      bodyHtml: comment.bodyHTML ?? "",
       createdAt: comment.createdAt,
       updatedAt: comment.updatedAt,
       isAnswer: comment.isAnswer,
@@ -220,6 +232,19 @@ export async function getThread(rawSlug, options = {}) {
 
   threadCache.set(key, payload);
   return { ...payload, cached: false };
+}
+
+/**
+ * Create the discussion for a slug when it does not exist yet, then read
+ * the thread back. Called when a logged-in reader posts the first comment.
+ *
+ * @param {string} rawSlug
+ * @returns {Promise<object>}
+ */
+export async function ensureThread(rawSlug) {
+  await ensureDiscussion(rawSlug);
+  purgeThread(rawSlug);
+  return getThread(rawSlug, { fresh: true });
 }
 
 /**

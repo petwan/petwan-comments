@@ -18,7 +18,7 @@
 import { createServer } from "node:http";
 import { config } from "./config.mjs";
 import { exchangeCode } from "./github.mjs";
-import { getThread, purgeThread } from "./threads.mjs";
+import { getThread, ensureThread, purgeThread } from "./threads.mjs";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8",
@@ -108,6 +108,30 @@ async function handle(req, res) {
 
     try {
       const thread = await getThread(slug, { fresh: url.searchParams.get("fresh") === "1" });
+      sendJson(res, 200, thread);
+    } catch (error) {
+      sendJson(res, 502, { error: error.message });
+    }
+    return;
+  }
+
+  // Create-on-first-comment: the client calls this right before posting
+  // the first comment of a page, then writes via its own user token.
+  if (req.method === "POST" && path === "/api/comments/thread") {
+    let body;
+    try {
+      body = await readJson(req);
+    } catch (error) {
+      sendJson(res, 400, { error: `bad request: ${error.message}` });
+      return;
+    }
+    if (!body?.slug) {
+      sendJson(res, 400, { error: "slug is required" });
+      return;
+    }
+
+    try {
+      const thread = await ensureThread(body.slug);
       sendJson(res, 200, thread);
     } catch (error) {
       sendJson(res, 502, { error: error.message });
