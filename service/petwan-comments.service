@@ -1,0 +1,25 @@
+[Unit]
+Description=Petwan comments service (GitHub Discussions proxy + OAuth exchange)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Root reads the environment file before the process drops privileges, so it
+# can stay mode 600 root:root while the service runs as www-data.
+EnvironmentFile=/etc/petwan-comments.env
+WorkingDirectory=/opt/petwan-comments/service
+ExecStart=/usr/local/bin/node /opt/petwan-comments/service/server.mjs
+Restart=always
+RestartSec=2
+User=www-data
+Group=www-data
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

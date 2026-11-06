@@ -1,0 +1,16 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Threads on this repository back the comment section of petwan.tech.
+
+        One discussion per article. The site creates the thread automatically
+        when a page is first opened, and keys it by the marker in the body:
+
+        ```html
+        <!-- petwan:thread path=/vla-reading/01-what-is-vla/ -->
+        ```
+
+        If you are replying to a specific article, open that article's thread
+        rather than starting a new one — it keeps the discussion attached to
+        the page it is about.

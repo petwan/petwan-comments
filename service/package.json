@@ -1,0 +1,14 @@
+{
+  "name": "petwan-comments-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Comment service for petwan.tech — GitHub Discussions proxy and OAuth exchange.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}

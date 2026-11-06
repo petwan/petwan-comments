@@ -1,0 +1,9 @@
+# Local environment — the real one lives on the server as
+# /etc/petwan-comments.env, mode 600.
+.env
+.env.*
+*.env
+
+node_modules/
+npm-debug.log*
+.DS_Store
