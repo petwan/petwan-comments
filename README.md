@@ -19,24 +19,35 @@ The title (`petwan: /vla-reading/01-what-is-vla/`) is a human-readable mirror.
 The marker is what the service parses — a title can be edited by hand, the
 marker cannot drift without the service noticing.
 
-The service creates the discussion the first time somebody opens the page, so
-there is nothing to set up per article.
+The discussion is created when somebody posts the first comment on a page, not
+on a page visit: a crawler should not be able to open an empty thread for every
+article.
+
+## Where the work happens
+
+| Step | Where | Why |
+|---|---|---|
+| Read a thread | browser → `api.github.com` | public discussions are served anonymously with `Access-Control-Allow-Origin: *` |
+| Render a comment | browser | GitHub's `html+json` media type returns already-sanitized `body_html` |
+| Post a comment | browser → `api.github.com/graphql` | the reader's own token, so the comment carries their name |
+| Exchange the OAuth code | server | `github.com/login/oauth/access_token` sends no CORS headers |
+| Create the discussion | server | only a token with write access to this repository may open one |
+
+So the server does two things and proxies no reads. It listens on
+`127.0.0.1:8788` behind nginx under `/api/comments/` and `/api/comments-auth/`,
+and is never exposed directly.
 
 ## Layout
 
 ```
 service/
-├── server.mjs     HTTP server: OAuth exchange + cached thread reads
+├── server.mjs     HTTP server: OAuth exchange + thread creation
 ├── config.mjs     environment parsing, fails fast on a missing variable
 ├── github.mjs     GraphQL and REST access
-├── threads.mjs    slug ↔ discussion mapping, thread reads
-├── cache.mjs      TTL cache
+├── threads.mjs    idempotent per-slug discussion creation
+├── thread-key.mjs slug marker parsing and normalisation
 └── petwan-comments.service   systemd unit
 ```
-
-The service runs on the site server as `petwan-comments.service`, listens on
-`127.0.0.1:8788`, and is reached through nginx under `/api/comments/` and
-`/api/comments-auth/`. It is never exposed directly.
 
 ## API
 
@@ -44,28 +55,26 @@ The service runs on the site server as `petwan-comments.service`, listens on
 |---|---|---|
 | `GET` | `/api/comments-auth/config` | `{ clientId, redirectUri }` |
 | `POST` | `/api/comments-auth/exchange` | `{ code, codeVerifier, redirectUri }` → `{ token, expiresIn, login }` |
-| `GET` | `/api/comments/thread?slug=…` | the thread and its comments; `&fresh=1` bypasses the cache |
-| `POST` | `/api/comments/cache/purge` | `{ slug }` → `204` |
-
-Reads happen here because GitHub's anonymous GraphQL budget is 60 requests per
-hour per IP — a limit every reader behind one office NAT would share. Writes
-do not happen here: the reader's own token posts straight to GitHub from the
-browser, so a comment is attributed to the person who wrote it.
+| `POST` | `/api/comments/thread` | `{ slug }` → `{ slug, discussion }`, creating it if absent |
 
 ## Configuration
 
 `/etc/petwan-comments.env`, mode `600 root:root`:
 
-| Variable | Meaning |
-|---|---|
-| `GITHUB_APP_CLIENT_ID` | the GitHub App's client id |
-| `GITHUB_APP_CLIENT_SECRET` | the GitHub App's client secret (optional with PKCE) |
-| `GITHUB_APP_REDIRECT_URI` | the OAuth callback URL |
-| `GITHUB_REPO_TOKEN` | fine-grained PAT, this repository, Discussions read/write |
-| `COMMENTS_REPOSITORY_ID` | GraphQL node id of this repository (`R_kgDO…`) |
-| `COMMENTS_CATEGORY_ID` | GraphQL node id of the discussion category (`DIC_kwDO…`) |
-| `COMMENTS_REPO` | defaults to `petwan/petwan-comments` |
-| `COMMENTS_PORT` | defaults to `8788` |
+| Variable | Meaning | Required |
+|---|---|---|
+| `GITHUB_APP_CLIENT_ID` | the OAuth app's client id | yes |
+| `GITHUB_REPO_TOKEN` | fine-grained PAT, this repository, Discussions read/write | yes |
+| `GITHUB_APP_CLIENT_SECRET` | the OAuth app's client secret | no — PKCE covers the exchange |
+| `GITHUB_APP_REDIRECT_URI` | the OAuth callback URL | no — defaults to `https://petwan.tech/auth/github/callback/` |
+| `COMMENTS_REPOSITORY_ID` | GraphQL node id of this repository | no — baked into `config.mjs` |
+| `COMMENTS_CATEGORY_ID` | GraphQL node id of the discussion category | no — baked into `config.mjs` |
+| `COMMENTS_REPO` | defaults to `petwan/petwan-comments` | no |
+| `COMMENTS_PORT` | defaults to `8788` | no |
+
+The client id, the redirect URI and both node ids are public values: they
+appear in the authorize URL and in anonymous API responses. Baking them in
+keeps the deployment down to two secrets.
 
 ## Moderation
 
@@ -86,10 +95,8 @@ site-wide note.
 
 ```bash
 cd service
-GITHUB_APP_CLIENT_ID=… GITHUB_APP_REDIRECT_URI=… GITHUB_REPO_TOKEN=… \
-COMMENTS_REPOSITORY_ID=… COMMENTS_CATEGORY_ID=… \
-node server.mjs
+GITHUB_APP_CLIENT_ID=… GITHUB_REPO_TOKEN=… node server.mjs
 ```
 
-The site proxies `/api/comments*` to `https://petwan.tech` in development, so
-the widget talks to production threads while you work on it.
+The site proxies `/api/comments*` to `127.0.0.1:8788` in development, so the
+widget talks to this service and reads threads straight from GitHub.

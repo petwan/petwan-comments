@@ -5,23 +5,30 @@
  * the process drops to `www-data`. That is why the file can stay mode 600
  * root:root while the process itself runs unprivileged.
  *
- * Every variable is required: a missing one is a deployment mistake, and
- * failing at startup is louder than failing on the first request.
+ * Only the repository token is a real secret. Everything else — the OAuth
+ * client id, the redirect URI, and the two GraphQL node ids — is public
+ * information that ships with the site, so they carry defaults here and the
+ * deployment can leave them unset.
  */
 
-const REQUIRED = [
-  "GITHUB_APP_CLIENT_ID",
-  "GITHUB_APP_REDIRECT_URI",
-  "GITHUB_REPO_TOKEN",
-  "COMMENTS_REPOSITORY_ID",
-  "COMMENTS_CATEGORY_ID",
-];
+const PUBLIC_DEFAULTS = {
+  GITHUB_APP_REDIRECT_URI: "https://petwan.tech/auth/github/callback/",
+  // The petwan/petwan-comments repository's GraphQL node id and the
+  // Discussions category new threads land in (General).
+  COMMENTS_REPOSITORY_ID: "R_kgDOVldYDg",
+  COMMENTS_CATEGORY_ID: "DIC_kwDOVldYDs4DKk_7",
+};
 
 function readEnv() {
-  const missing = REQUIRED.filter((name) => !process.env[name]);
+  // The OAuth app's client id is public, but only you know it, so it has no
+  // default here. The repository token is the one real secret.
+  const missing = ["GITHUB_APP_CLIENT_ID", "GITHUB_REPO_TOKEN"]
+    .filter((name) => !process.env[name]);
   if (missing.length > 0) {
     throw new Error(
       `missing environment variables: ${missing.join(", ")}\n` +
+        "GITHUB_APP_CLIENT_ID is the OAuth app's public client id; " +
+        "GITHUB_REPO_TOKEN is a fine-grained PAT with Discussions read/write. " +
         "Set them in /etc/petwan-comments.env and restart the unit.",
     );
   }
@@ -32,24 +39,22 @@ function readEnv() {
     throw new Error(`COMMENTS_REPO must look like "owner/name", got "${repo}"`);
   }
 
+  const value = (key) => process.env[key] ?? PUBLIC_DEFAULTS[key];
+
   return {
-    clientId: process.env.GITHUB_APP_CLIENT_ID,
+    clientId: value("GITHUB_APP_CLIENT_ID"),
+    // Optional: PKCE means the exchange works without it. Set it if the
+    // OAuth app has one and you want GitHub to verify the caller too.
     clientSecret: process.env.GITHUB_APP_CLIENT_SECRET ?? "",
-    redirectUri: process.env.GITHUB_APP_REDIRECT_URI,
+    redirectUri: value("GITHUB_APP_REDIRECT_URI"),
     repoToken: process.env.GITHUB_REPO_TOKEN,
-    repositoryId: process.env.COMMENTS_REPOSITORY_ID,
-    categoryId: process.env.COMMENTS_CATEGORY_ID,
+    repositoryId: value("COMMENTS_REPOSITORY_ID"),
+    categoryId: value("COMMENTS_CATEGORY_ID"),
     owner,
     name,
     repo,
     port: Number(process.env.COMMENTS_PORT ?? 8788),
     host: process.env.COMMENTS_HOST ?? "127.0.0.1",
-    // How long a thread payload stays fresh. Comments land within seconds,
-    // so a short TTL keeps the page close to live without hammering the API.
-    threadTtlMs: Number(process.env.COMMENTS_THREAD_TTL_MS ?? 30_000),
-    // The slug -> discussion index changes far less often than the thread
-    // contents do.
-    indexTtlMs: Number(process.env.COMMENTS_INDEX_TTL_MS ?? 30 * 60_000),
   };
 }
 

@@ -6,19 +6,23 @@
  *   - OAuth: the browser cannot exchange an authorization code for a token
  *     (github.com/login/oauth/access_token sends no CORS headers), so the
  *     exchange happens here.
- *   - Reads: every comment read happens here, because GitHub's anonymous
- *     GraphQL budget is 60 requests per hour per IP — a limit a shared
- *     office or carrier NAT would blow through in one afternoon.
+ *   - Thread creation: only a token with write access to the repository can
+ *     open a discussion, which a reader's token does not have. The server
+ *     creates the thread once, right before the page's first comment.
  *
- * Writes deliberately do NOT happen here: the reader's own token posts
- * straight to api.github.com from the browser, so the comment is attributed
- * to the person who wrote it. The server never sees the reader's token.
+ * Reads deliberately do NOT happen here: api.github.com serves public
+ * discussions anonymously with `Access-Control-Allow-Origin: *`, so the
+ * browser fetches threads directly and the server never proxies them.
+ *
+ * Writes deliberately do NOT happen here either: the reader posts with their
+ * own token from the browser, so the comment is attributed to the person who
+ * wrote it and the server never sees that token.
  */
 
 import { createServer } from "node:http";
 import { config } from "./config.mjs";
 import { exchangeCode } from "./github.mjs";
-import { getThread, ensureThread, purgeThread } from "./threads.mjs";
+import { ensureDiscussion } from "./threads.mjs";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8",
@@ -99,24 +103,9 @@ async function handle(req, res) {
     return;
   }
 
-  if (req.method === "GET" && path === "/api/comments/thread") {
-    const slug = url.searchParams.get("slug");
-    if (!slug) {
-      sendJson(res, 400, { error: "slug is required" });
-      return;
-    }
-
-    try {
-      const thread = await getThread(slug, { fresh: url.searchParams.get("fresh") === "1" });
-      sendJson(res, 200, thread);
-    } catch (error) {
-      sendJson(res, 502, { error: error.message });
-    }
-    return;
-  }
-
-  // Create-on-first-comment: the client calls this right before posting
-  // the first comment of a page, then writes via its own user token.
+  // Create-on-first-comment: the client calls this right before posting the
+  // page's first comment, then writes with its own token. Idempotent per
+  // slug, so a retry returns the same thread instead of opening a second.
   if (req.method === "POST" && path === "/api/comments/thread") {
     let body;
     try {
@@ -131,29 +120,11 @@ async function handle(req, res) {
     }
 
     try {
-      const thread = await ensureThread(body.slug);
-      sendJson(res, 200, thread);
+      const discussion = await ensureDiscussion(body.slug);
+      sendJson(res, 200, { slug: body.slug, discussion });
     } catch (error) {
       sendJson(res, 502, { error: error.message });
     }
-    return;
-  }
-
-  if (req.method === "POST" && path === "/api/comments/cache/purge") {
-    let body;
-    try {
-      body = await readJson(req);
-    } catch (error) {
-      sendJson(res, 400, { error: `bad request: ${error.message}` });
-      return;
-    }
-    if (!body?.slug) {
-      sendJson(res, 400, { error: "slug is required" });
-      return;
-    }
-    purgeThread(body.slug);
-    res.writeHead(204, SECURITY_HEADERS);
-    res.end();
     return;
   }
 

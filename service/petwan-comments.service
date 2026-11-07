@@ -1,5 +1,5 @@
 [Unit]
-Description=Petwan comments service (GitHub Discussions proxy + OAuth exchange)
+Description=Petwan comments service (OAuth exchange + thread creation)
 After=network-online.target
 Wants=network-online.target
 
@@ -9,7 +9,7 @@ Type=simple
 # can stay mode 600 root:root while the service runs as www-data.
 EnvironmentFile=/etc/petwan-comments.env
 WorkingDirectory=/opt/petwan-comments/service
-ExecStart=/usr/local/bin/node /opt/petwan-comments/service/server.mjs
+ExecStart=/usr/bin/node /opt/petwan-comments/service/server.mjs
 Restart=always
 RestartSec=2
 User=www-data
