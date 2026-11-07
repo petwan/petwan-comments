@@ -83,10 +83,12 @@ export async function rest(path) {
  *
  * This has to happen server-side: github.com/login/oauth/access_token
  * returns no Access-Control-Allow-Origin header, so a browser cannot call
- * it. PKCE means the client_secret is not required for the exchange, but
- * the client_id is, and both the client_id and the redirect_uri are pinned
- * to the configured values — an endpoint that swapped arbitrary codes for
- * tokens would be a credential oracle for every other app.
+ * it. PKCE means the code_verifier proves the caller owns the
+ * authorization request, but GitHub still requires the client_secret to
+ * identify the client — without it the exchange answers
+ * `incorrect_client_credentials`. The client_id and the redirect_uri are
+ * pinned to the configured values: an endpoint that swapped arbitrary codes
+ * for tokens would be a credential oracle for every other app.
  *
  * @param {{code: string, codeVerifier: string, redirectUri: string}} input
  * @returns {Promise<{token: string, expiresIn: number, login: string}>}
@@ -98,11 +100,11 @@ export async function exchangeCode({ code, codeVerifier, redirectUri }) {
 
   const body = new URLSearchParams({
     client_id: config.clientId,
+    client_secret: config.clientSecret,
     code,
     code_verifier: codeVerifier,
     redirect_uri: redirectUri,
   });
-  if (config.clientSecret) body.set("client_secret", config.clientSecret);
 
   const response = await fetch("https://github.com/login/oauth/access_token", {
     method: "POST",

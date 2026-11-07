@@ -33,6 +33,20 @@ function readEnv() {
     );
   }
 
+  // GitHub's token exchange rejects a client that sends no secret, even
+  // with a valid PKCE verifier: `incorrect_client_credentials`. The
+  // verifier proves the caller owns the authorization request; the secret
+  // identifies the client to GitHub. Both are required, so a missing
+  // secret is a configuration error, not an optional extra.
+  if (!process.env.GITHUB_APP_CLIENT_SECRET) {
+    throw new Error(
+      "missing environment variable: GITHUB_APP_CLIENT_SECRET\n" +
+        "GitHub's token exchange rejects the request without it. Generate a " +
+        "client secret on the OAuth app page and set it in " +
+        "/etc/petwan-comments.env, then restart the unit.",
+    );
+  }
+
   const repo = process.env.COMMENTS_REPO ?? "petwan/petwan-comments";
   const [owner, name] = repo.split("/");
   if (!owner || !name) {
@@ -43,8 +57,8 @@ function readEnv() {
 
   return {
     clientId: value("GITHUB_APP_CLIENT_ID"),
-    // Optional: PKCE means the exchange works without it. Set it if the
-    // OAuth app has one and you want GitHub to verify the caller too.
+    // Required by GitHub's token exchange. PKCE proves the caller owns
+    // the authorization request; the secret identifies the client.
     clientSecret: process.env.GITHUB_APP_CLIENT_SECRET ?? "",
     redirectUri: value("GITHUB_APP_REDIRECT_URI"),
     repoToken: process.env.GITHUB_REPO_TOKEN,
